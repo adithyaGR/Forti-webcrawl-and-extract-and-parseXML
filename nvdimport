@@ -1,0 +1,83 @@
+#!/usr/bin/env python
+
+import sys
+import gzip
+import sqlite3
+import os
+import xml.etree.ElementTree as ET
+
+
+def _db_open(database):
+    conn = sqlite3.connect(database)
+
+    # Create table
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS cve
+                 (cve_id TEXT, severity TEXT, published TEXT, modified TEXT)''')
+
+    return conn
+
+
+def parse_feed(data):
+    rows = []
+    root = ET.fromstring(data)
+    for entry in root.findall('{http://scap.nist.gov/schema/feed/vulnerability/2.0}entry'):
+        row = {
+            'cve_id': entry.find('{http://scap.nist.gov/schema/vulnerability/0.4}cve-id'),
+            'severity': entry.find('.//{http://scap.nist.gov/schema/cvss-v2/0.2}score'),
+            'published': entry.find('{http://scap.nist.gov/schema/vulnerability/0.4}published-datetime'),
+            'modified': entry.find('{http://scap.nist.gov/schema/vulnerability/0.4}last-modified-datetime'),
+        }
+        for k,v in row.items():
+            if v is not None:
+                row[k] = v.text
+        rows.append(row)
+    return rows
+
+
+def import_feed(feed, database):
+    print "Importing feed '%s'..." % feed
+
+    with gzip.open(feed, 'rb') as f:
+        data = f.read()
+        if not data:
+            raise Exception("Empty feed %s" % feed)
+
+        rows = [r.values() for r in parse_feed(data)]
+
+        conn = _db_open(database)
+        c = conn.cursor()
+        c.executemany('INSERT INTO cve VALUES (?,?,?,?)', rows)
+        conn.commit()
+        conn.close()
+
+
+if __name__ == "__main__":
+
+    def help():
+        print "Import NVD feed to sqlite database"
+        print
+        print "Usage: %s FEED DATABASE" % sys.argv[0]
+        print "       where FEED is a feed archive path like nvdcve-2.0-2015.xml.gz"
+        print "       and DATABASE is sqlite file name like data.db"
+        sys.exit(0)
+
+    try:
+
+        feed, database = None, None
+        try:
+            if len(sys.argv) == 3:
+                feed, database = sys.argv[1], sys.argv[2]
+            else:
+                help()
+        except Exception:
+            help()
+
+        if not os.path.isfile(feed) or not feed.endswith(".xml.gz"):
+            raise Exception("%s is missing or not a feed archive file" % feed)
+
+        import_feed(feed, database)
+
+    except Exception as e:
+        print >> sys.stderr, e.message
+        sys.exit(1)
