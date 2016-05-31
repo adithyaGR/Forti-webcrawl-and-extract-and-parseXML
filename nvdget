@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+
+import urllib2
+import sys
+import re
+
+DOWNLOAD_PAGE_URL = "https://nvd.nist.gov/download.cfm"
+
+
+def get_feeds(year_min=None, year_max=None):
+    """
+    Get a dictionary of feeds v2.0 by timeline from download url
+
+    :return:
+    { 2002: "http://...gz",... }
+    """
+    try:
+        feeds = {}
+        response = urllib2.urlopen(DOWNLOAD_PAGE_URL)
+        data = response.read()
+        matches = re.findall("a href=[\"'](http://static\.nvd\.nist\.gov/feeds/xml/cve/nvdcve-2\.0-(.*?)\.xml\.gz)[\"']", data)
+        for match in matches:
+            url, year = match
+            if year.isdigit():
+                year = int(year)
+                if (not year_min or year >= year_min) and (not year_max or year <= year_max):
+                    feeds[year] = url
+        return feeds
+    except urllib2.URLError as e:
+        raise Exception("Can not list NVD feeds: %s" % e.reason[1])
+
+
+def download_feed(url, name):
+    try:
+        print "Downloading feed '%s'..." % name
+        response = urllib2.urlopen(url)
+        data = response.read()
+        with open(name, "wb") as f:
+            f.write(data)
+    except urllib2.URLError as e:
+        raise Exception("Can not download NVD feed %s: %s" % (name, e.reason[1]))
+
+
+if __name__ == "__main__":
+
+    def help():
+        print "Download NVD feeds by timeline"
+        print
+        print "Usage: %s YEAR_MIN YEAR_MAX or \n       %s YEAR" % (sys.argv[0], sys.argv[0])
+        print "       start without arguments to get all feeds"
+        sys.exit(0)
+
+    try:
+
+        year_min, year_max = None, None
+        try:
+            if len(sys.argv) == 3:
+                year_min, year_max = int(sys.argv[1]), int(sys.argv[2])
+            elif len(sys.argv) == 2:
+                if sys.argv[1] in ("-h", "--help"):
+                    help()
+                else:
+                    year_min, year_max = int(sys.argv[1]), int(sys.argv[1])
+            elif len(sys.argv) != 1:
+                help()
+        except Exception:
+            help()
+
+        feeds = get_feeds(year_min, year_max)
+        for year,url in feeds.items():
+            download_feed(url, "nvdcve-2.0-%s.xml.gz" % year)
+
+    except Exception as e:
+        print >> sys.stderr, e.message
+        sys.exit(1)
